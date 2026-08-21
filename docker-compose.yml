@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: inplant-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-inplant}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-inplant_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-inplant}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/init-scripts:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-inplant}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: inplant-backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-inplant}:${POSTGRES_PASSWORD:-inplant_dev}@postgres:5432/${POSTGRES_DB:-inplant}
+      NVIDIA_API_KEY: ${NVIDIA_API_KEY}
+      NVIDIA_BASE_URL: ${NVIDIA_BASE_URL:-https://integrate.api.nvidia.com/v1}
+      NVIDIA_CHAT_MODEL: ${NVIDIA_CHAT_MODEL:-nvidia/nemotron-3-ultra}
+      NVIDIA_EMBED_MODEL: ${NVIDIA_EMBED_MODEL:-nvidia/nv-embed-v1}
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-in-production}
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRE_MINUTES: 10080
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: inplant-frontend
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0 --port 5173
+
+volumes:
+  postgres_data:
